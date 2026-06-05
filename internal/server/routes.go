@@ -234,14 +234,14 @@ func (s *Server) withdrawHandler(w http.ResponseWriter, r *http.Request) {
 		Sum   decimal.Decimal `json:"sum"`
 	}
 
-	orderNumber, err := strconv.ParseInt(req.Order, 10, 64)
-	if err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
+	orderNumber, err := strconv.ParseInt(req.Order, 10, 64)
+	if err != nil || !luhnCheck(orderNumber) {
+		w.WriteHeader(http.StatusUnprocessableEntity) // 422
 		return
 	}
 
