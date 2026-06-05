@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/vancuverya-dot/gophermart/internal/config"
+	"github.com/vancuverya-dot/gophermart/internal/migrations"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgerrcode"
@@ -50,6 +51,10 @@ func New() Service {
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(10)
 	db.SetConnMaxLifetime(5 * time.Minute)
+
+	if err := migrations.Up(db); err != nil {
+		log.Fatalf("failed to run migrations: %v", err)
+	}
 
 	dbInstance = &service{
 		db: db,
