@@ -13,10 +13,29 @@ var (
 )
 
 func Init() {
-	flag.StringVar(&RunAddress, "a", os.Getenv("RUN_ADDRESS"), "address and port to run server")
-	flag.StringVar(&DbUri, "d", os.Getenv("DB_URI"), "database uri")
-	flag.StringVar(&AccrualSystemAddress, "r", os.Getenv("ACCRUAL_SYSTEM_ADDRESS"), "address of accrual system")
+	var runAddress, dbUri, accrualAddress string
+	flag.StringVar(&runAddress, "a", "", "address and port to run server")
+	flag.StringVar(&dbUri, "d", "", "database uri")
+	flag.StringVar(&accrualAddress, "r", "", "address of accrual system")
 	flag.Parse()
+
+	if runAddress != "" {
+		RunAddress = runAddress
+	} else {
+		RunAddress = os.Getenv("RUN_ADDRESS")
+	}
+
+	if dbUri != "" {
+		DbUri = dbUri
+	} else {
+		DbUri = os.Getenv("DATABASE_URI")
+	}
+
+	if accrualAddress != "" {
+		AccrualSystemAddress = accrualAddress
+	} else {
+		AccrualSystemAddress = os.Getenv("ACCRUAL_SYSTEM_ADDRESS")
+	}
 
 	TokenKey = os.Getenv("TOKEN_KEY")
 }
