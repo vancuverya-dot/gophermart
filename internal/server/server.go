@@ -4,8 +4,6 @@ import (
 	"net/http"
 	"time"
 
-	_ "github.com/joho/godotenv/autoload"
-
 	"github.com/vancuverya-dot/gophermart/internal/config"
 	"github.com/vancuverya-dot/gophermart/internal/database"
 )
