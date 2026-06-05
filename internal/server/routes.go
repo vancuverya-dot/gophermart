@@ -82,6 +82,9 @@ func (s *Server) registerHandler(w http.ResponseWriter, r *http.Request) {
 		Value:    token,
 		HttpOnly: true,
 	})
+
+	w.Header().Set("Authorization", token)
+
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -125,6 +128,9 @@ func (s *Server) loginHandler(w http.ResponseWriter, r *http.Request) {
 		Value:    token,
 		HttpOnly: true,
 	})
+
+	w.Header().Set("Authorization", token)
+
 	w.WriteHeader(http.StatusOK)
 }
 
