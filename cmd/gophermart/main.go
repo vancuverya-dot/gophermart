@@ -33,12 +33,9 @@ func gracefulShutdown(apiServer *http.Server, done chan bool) {
 }
 
 func main() {
-	config.Init()
+	godotenv.Load()
 
-	if config.DbUri == "" {
-		godotenv.Load()
-		config.Init()
-	}
+	config.Init()
 
 	log.Printf("Config: addr=%s db=%s", config.RunAddress, config.DbUri)
 
