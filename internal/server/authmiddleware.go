@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/vancuverya-dot/gophermart/internal/config"
@@ -42,6 +43,12 @@ func AuthMiddleware(next http.Handler) http.Handler {
 			}
 			return []byte(config.TokenKey), nil
 		})
+
+		if err != nil || !token.Valid {
+			log.Printf("token validation failed: err=%v valid=%v tokenStr=%s", err, token.Valid, tokenStr) // ← сюда
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
 
 		if err != nil || !token.Valid {
 			w.WriteHeader(http.StatusUnauthorized)

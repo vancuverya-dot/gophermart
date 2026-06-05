@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -314,6 +315,7 @@ func luhnCheck(number int64) bool {
 }
 
 func generateToken(u4 string) (string, error) {
+	log.Printf("generating token for uid=%s key=%s", u4, config.TokenKey)
 	claims := &Claims{
 		UserID:           u4,
 		RegisteredClaims: jwt.RegisteredClaims{},
