@@ -33,12 +33,14 @@ func gracefulShutdown(apiServer *http.Server, done chan bool) {
 }
 
 func main() {
-	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found, using flags and environment variables")
+	config.Init()
+
+	if config.DbUri == "" {
+		godotenv.Load()
+		config.Init()
 	}
 
-	config.Init()
-	log.Printf("Config: addr=%s db=%s accrual=%s", config.RunAddress, config.DbUri, config.AccrualSystemAddress)
+	log.Printf("Config: addr=%s db=%s", config.RunAddress, config.DbUri)
 
 	srv := server.NewServer()
 	log.Printf("Starting server on %s", srv.Addr)
