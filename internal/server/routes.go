@@ -77,13 +77,12 @@ func (s *Server) registerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Authorization", token)
 	http.SetCookie(w, &http.Cookie{
 		Name:     "token",
 		Value:    token,
 		HttpOnly: true,
 	})
-
-	w.Header().Set("Authorization", token)
 
 	w.WriteHeader(http.StatusOK)
 }
@@ -123,13 +122,12 @@ func (s *Server) loginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Authorization", token)
 	http.SetCookie(w, &http.Cookie{
 		Name:     "token",
 		Value:    token,
 		HttpOnly: true,
 	})
-
-	w.Header().Set("Authorization", token)
 
 	w.WriteHeader(http.StatusOK)
 }
