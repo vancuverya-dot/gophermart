@@ -183,7 +183,7 @@ func (s *service) GetOrdersByAccountUUID(ctx context.Context, accountUUID string
 		}
 
 		order := map[string]interface{}{
-			"number":      code,
+			"number":      strconv.FormatInt(code, 10),
 			"uploaded_at": createdAt,
 			"status":      status,
 		}
@@ -224,8 +224,8 @@ func (s *service) GetBalance(ctx context.Context, accountUUID string) (map[strin
 	}
 
 	return map[string]interface{}{
-		"current":   balance,
-		"withdrawn": withdrawn,
+		"current":   balance.InexactFloat64(),
+		"withdrawn": withdrawn.InexactFloat64(),
 	}, nil
 }
 
