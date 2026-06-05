@@ -2,13 +2,14 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/joho/godotenv"
+	"github.com/vancuverya-dot/gophermart/internal/config"
 	"github.com/vancuverya-dot/gophermart/internal/server"
 )
 
@@ -32,18 +33,22 @@ func gracefulShutdown(apiServer *http.Server, done chan bool) {
 }
 
 func main() {
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found, using flags and environment variables")
+	}
 
-	server := server.NewServer()
+	config.Init()
+	log.Printf("Config: addr=%s db=%s accrual=%s", config.RunAddress, config.DbUri, config.AccrualSystemAddress)
 
-	log.Printf("Starting server on %s", server.Addr)
+	srv := server.NewServer()
+	log.Printf("Starting server on %s", srv.Addr)
 
 	done := make(chan bool, 1)
+	go gracefulShutdown(srv, done)
 
-	go gracefulShutdown(server, done)
-
-	err := server.ListenAndServe()
+	err := srv.ListenAndServe()
 	if err != nil && err != http.ErrServerClosed {
-		panic(fmt.Sprintf("http server error: %s", err))
+		log.Fatalf("http server error: %s", err)
 	}
 
 	<-done

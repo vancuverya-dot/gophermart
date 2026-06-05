@@ -12,7 +12,7 @@ var (
 	AccrualSystemAddress string
 )
 
-func init() {
+func Init() {
 	flag.StringVar(&RunAddress, "a", os.Getenv("RUN_ADDRESS"), "address and port to run server")
 	flag.StringVar(&DbUri, "d", os.Getenv("DB_URI"), "database uri")
 	flag.StringVar(&AccrualSystemAddress, "r", os.Getenv("ACCRUAL_SYSTEM_ADDRESS"), "address of accrual system")
