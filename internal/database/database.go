@@ -190,7 +190,7 @@ func (s *service) GetOrdersByAccountUUID(ctx context.Context, accountUUID string
 		}
 
 		if accrual.Valid {
-			order["accrual"] = accrual.Decimal
+			order["accrual"] = accrual.Decimal.InexactFloat64()
 		}
 		orders = append(orders, order)
 	}
@@ -315,7 +315,7 @@ func (s *service) GetWithdrawals(ctx context.Context, accountUUID string) ([]map
 
 		withdrawals = append(withdrawals, map[string]interface{}{
 			"order":        strconv.FormatInt(orderNumber, 10),
-			"sum":          sum,
+			"sum":          sum.InexactFloat64(),
 			"processed_at": createdAt,
 		})
 	}
