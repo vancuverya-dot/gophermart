@@ -44,7 +44,7 @@ func New() Service {
 		return dbInstance
 	}
 
-	db, err := sql.Open("pgx", config.DbUri)
+	db, err := sql.Open("pgx", config.DBURI)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func New() Service {
 }
 
 var ErrLoginTaken = errors.New("login already taken")
-var UserNotFound = errors.New("user not found")
+var ErrUserNotFound = errors.New("user not found")
 var ErrOrderAlreadyExists = errors.New("order already uploaded by this user")
 var ErrOrderTakenByAnother = errors.New("order already uploaded by another user")
 var ErrAccountNotFound = errors.New("account not found")
@@ -98,7 +98,7 @@ func (s *service) Register(ctx context.Context, login, pass string) (string, err
 
 // Login — поиск пользователя. поиск производится по паре логин/хэш.
 // Возможные ошибки
-// UserNotFound — пользователь не найден;
+// ErrUserNotFound — пользователь не найден;
 func (s *service) Login(ctx context.Context, login, pass string) (string, error) {
 	hash := sha256.Sum256([]byte(pass))
 	hashStr := fmt.Sprintf("%x", hash)
@@ -113,7 +113,7 @@ func (s *service) Login(ctx context.Context, login, pass string) (string, error)
 
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", UserNotFound
+			return "", ErrUserNotFound
 		}
 		return "", err
 	}

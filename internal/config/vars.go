@@ -7,7 +7,7 @@ import (
 
 var (
 	TokenKey             string
-	DbUri                string
+	DBURI                string
 	RunAddress           string
 	AccrualSystemAddress string
 )
@@ -26,9 +26,9 @@ func Init() {
 	}
 
 	if dbUri != "" {
-		DbUri = dbUri
+		DBURI = dbUri
 	} else {
-		DbUri = os.Getenv("DATABASE_URI")
+		DBURI = os.Getenv("DATABASE_URI")
 	}
 
 	if accrualAddress != "" {

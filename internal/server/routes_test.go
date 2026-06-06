@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -46,6 +47,8 @@ func (m *mockDB) GetWithdrawals(ctx context.Context, accountUUID string) ([]map[
 	return m.getWithdrawalsFn(ctx, accountUUID)
 }
 func (m *mockDB) Close() error { return nil }
+
+func (m *mockDB) DB() *sql.DB { return nil }
 
 // newTestServer — создаёт тестовый сервер с мок БД
 func newTestServer(db *mockDB) *Server {
@@ -121,7 +124,7 @@ func TestLoginHandler(t *testing.T) {
 		{
 			name:       "user not found",
 			body:       map[string]string{"login": "user1", "password": "wrong"},
-			mockFn:     func(ctx context.Context, login, pass string) (string, error) { return "", database.UserNotFound },
+			mockFn:     func(ctx context.Context, login, pass string) (string, error) { return "", database.ErrUserNotFound },
 			wantStatus: http.StatusUnauthorized,
 		},
 		{

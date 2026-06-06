@@ -109,7 +109,7 @@ func (s *Server) loginHandler(w http.ResponseWriter, r *http.Request) {
 
 	uid, err := s.db.Login(r.Context(), req.Login, req.Password)
 	if err != nil {
-		if errors.Is(err, database.UserNotFound) {
+		if errors.Is(err, database.ErrUserNotFound) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}

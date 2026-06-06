@@ -58,6 +58,10 @@ func (w *Worker) process(ctx context.Context) {
 		}
 		w.processOne(ctx, uuid, code)
 	}
+
+	if err := rows.Err(); err != nil { // ← добавь
+		log.Printf("worker: rows error: %v", err)
+	}
 }
 
 func (w *Worker) processOne(ctx context.Context, uuid string, code int64) {
