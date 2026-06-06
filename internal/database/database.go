@@ -30,6 +30,7 @@ type Service interface {
 	GetBalance(ctx context.Context, accountUUID string) (map[string]interface{}, error)
 	Withdraw(ctx context.Context, accountUUID string, orderNumber int64, sum decimal.Decimal) error
 	GetWithdrawals(ctx context.Context, accountUUID string) ([]map[string]interface{}, error)
+	DB() *sql.DB
 }
 
 type service struct {
@@ -280,6 +281,11 @@ func (s *service) Withdraw(ctx context.Context, accountUUID string, orderNumber 
 	}
 
 	return tx.Commit()
+}
+
+// DB — возвращает внутренний *sql.DB для воркера.
+func (s *service) DB() *sql.DB {
+	return s.db
 }
 
 // GetWithdrawals — получение информации о выводе средств с накопительного счёта пользователем.

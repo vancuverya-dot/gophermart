@@ -8,9 +8,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/joho/godotenv"
 	"github.com/vancuverya-dot/gophermart/internal/config"
+	"github.com/vancuverya-dot/gophermart/internal/database"
 	"github.com/vancuverya-dot/gophermart/internal/server"
+	"github.com/vancuverya-dot/gophermart/internal/worker"
 )
 
 func gracefulShutdown(apiServer *http.Server, done chan bool) {
@@ -33,23 +34,23 @@ func gracefulShutdown(apiServer *http.Server, done chan bool) {
 }
 
 func main() {
-	godotenv.Load()
-
 	config.Init()
 
-	log.Printf("Config: addr=%s db=%s", config.RunAddress, config.DbUri)
+	db := database.New()
 
-	srv := server.NewServer()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go worker.New(db.DB()).Run(ctx)
+
+	srv := server.NewServer(db)
 	log.Printf("Starting server on %s", srv.Addr)
 
 	done := make(chan bool, 1)
 	go gracefulShutdown(srv, done)
 
-	err := srv.ListenAndServe()
-	if err != nil && err != http.ErrServerClosed {
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("http server error: %s", err)
 	}
-
 	<-done
 	log.Println("Graceful shutdown complete.")
 }

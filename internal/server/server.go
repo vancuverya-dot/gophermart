@@ -13,19 +13,16 @@ type Server struct {
 	db   database.Service
 }
 
-func NewServer() *http.Server {
-	NewServer := &Server{
+func NewServer(db database.Service) *http.Server {
+	s := &Server{
 		addr: config.RunAddress,
-		db:   database.New(),
+		db:   db,
 	}
-
-	server := &http.Server{
-		Addr:         NewServer.addr,
-		Handler:      NewServer.RegisterRoutes(),
+	return &http.Server{
+		Addr:         s.addr,
+		Handler:      s.RegisterRoutes(),
 		IdleTimeout:  time.Minute,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
-
-	return server
 }
