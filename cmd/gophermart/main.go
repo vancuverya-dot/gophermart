@@ -40,7 +40,7 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go worker.New(db.DB()).Run(ctx)
+	go worker.New(db).Run(ctx)
 
 	srv := server.NewServer(db)
 	log.Printf("Starting server on %s", srv.Addr)

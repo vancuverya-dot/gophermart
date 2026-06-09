@@ -2,73 +2,120 @@ package worker
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/shopspring/decimal"
 	"github.com/vancuverya-dot/gophermart/internal/config"
+	"github.com/vancuverya-dot/gophermart/internal/database"
 )
 
-type Worker struct {
-	db     *sql.DB
-	client *http.Client
-}
+const workerCount = 5
 
 type accrualResp struct {
 	Status  string          `json:"status"`
 	Accrual decimal.Decimal `json:"accrual"`
 }
 
-func New(db *sql.DB) *Worker {
-	return &Worker{db: db, client: &http.Client{Timeout: 10 * time.Second}}
+type order struct {
+	uuid string
+	code int64
+}
+
+type Worker struct {
+	db     database.Service
+	client *http.Client
+	jobs   chan order
+	mu     sync.RWMutex
+}
+
+func New(db database.Service) *Worker {
+	return &Worker{
+		db:     db,
+		client: &http.Client{Timeout: 10 * time.Second},
+		jobs:   make(chan order, 100),
+	}
 }
 
 func (w *Worker) Run(ctx context.Context) {
+	var wg sync.WaitGroup
+
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			w.runWorker(ctx)
+		}()
+	}
+
+	go w.dispatch(ctx)
+
+	wg.Wait()
+	log.Println("worker pool stopped")
+}
+
+func (w *Worker) dispatch(ctx context.Context) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
+			close(w.jobs)
 			return
 		case <-ticker.C:
-			w.process(ctx)
+			w.mu.RLock()
+			w.loadJobs(ctx)
+			w.mu.RUnlock()
 		}
 	}
 }
 
-func (w *Worker) process(ctx context.Context) {
-	rows, err := w.db.QueryContext(ctx,
-		`SELECT orders_uuid, orders_code FROM public.orders WHERE orders_status IN ('NEW', 'PROCESSING')`)
+func (w *Worker) loadJobs(ctx context.Context) {
+	orders, err := w.db.GetPendingOrders(ctx)
 	if err != nil {
 		log.Printf("worker: query error: %v", err)
 		return
 	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var uuid string
-		var code int64
-		if err := rows.Scan(&uuid, &code); err != nil {
-			continue
+	for _, o := range orders {
+		select {
+		case w.jobs <- order{uuid: o.UUID, code: o.Code}:
+		case <-ctx.Done():
+			return
+		default:
+			return
 		}
-		w.processOne(ctx, uuid, code)
-	}
-
-	if err := rows.Err(); err != nil { // ← добавь
-		log.Printf("worker: rows error: %v", err)
 	}
 }
 
-func (w *Worker) processOne(ctx context.Context, uuid string, code int64) {
-	url := fmt.Sprintf("%s/api/orders/%d", config.AccrualSystemAddress, code)
+func (w *Worker) runWorker(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case o, ok := <-w.jobs:
+			if !ok {
+				return
+			}
+
+			w.mu.RLock()
+			w.processOne(ctx, o)
+			w.mu.RUnlock()
+		}
+	}
+}
+
+func (w *Worker) processOne(ctx context.Context, o order) {
+	url := fmt.Sprintf("%s/api/orders/%d", config.AccrualSystemAddress, o.code)
+
 	resp, err := w.client.Get(url)
 	if err != nil {
-		log.Printf("worker: get error: %v", err)
+		log.Printf("worker: request error: %v", err)
 		return
 	}
 	defer resp.Body.Close()
@@ -79,19 +126,37 @@ func (w *Worker) processOne(ctx context.Context, uuid string, code int64) {
 		if sec == 0 {
 			sec = 60
 		}
-		time.Sleep(time.Duration(sec) * time.Second)
-		return
+		log.Printf("worker: hit 429, freezing all workers for %d seconds", sec)
+
+		w.mu.RUnlock()
+		w.mu.Lock()
+
+		select {
+		case <-time.After(time.Duration(sec) * time.Second):
+		case <-ctx.Done():
+			w.mu.Unlock()
+			return
+		}
+
+		w.mu.Unlock()
+		w.mu.RLock()
+
+		select {
+		case w.jobs <- o:
+		case <-ctx.Done():
+		}
+
 	case http.StatusOK:
-	default:
-		return
-	}
+		var a accrualResp
+		if err := json.NewDecoder(resp.Body).Decode(&a); err != nil {
+			log.Printf("worker: decode error: %v", err)
+			return
+		}
+		w.update(ctx, o.uuid, a)
 
-	var a accrualResp
-	if err := json.NewDecoder(resp.Body).Decode(&a); err != nil {
-		return
+	case http.StatusNoContent:
+		log.Printf("worker: order %d not found in accrual", o.code)
 	}
-
-	w.update(ctx, uuid, a)
 }
 
 func (w *Worker) update(ctx context.Context, uuid string, a accrualResp) {
@@ -102,36 +167,10 @@ func (w *Worker) update(ctx context.Context, uuid string, a accrualResp) {
 		"INVALID":    "INVALID",
 	}[a.Status]
 	if status == "" {
-		status = "NEW"
+		status = "PROCESSING"
 	}
 
-	tx, err := w.db.BeginTx(ctx, nil)
-	if err != nil {
-		return
+	if err := w.db.UpdateOrderAccrual(ctx, uuid, status, a.Accrual); err != nil {
+		log.Printf("worker: update error: %v", err)
 	}
-	defer tx.Rollback()
-
-	_, err = tx.ExecContext(ctx,
-		`UPDATE public.orders SET orders_status=$1, orders_accrual=$2 WHERE orders_uuid=$3`,
-		status, a.Accrual, uuid,
-	)
-	if err != nil {
-		log.Printf("worker: update order error: %v", err)
-		return
-	}
-
-	if a.Status == "PROCESSED" && !a.Accrual.IsZero() {
-		_, err = tx.ExecContext(ctx,
-			`UPDATE public.account a SET account_balance = account_balance + $1
-			 FROM public.orders o
-			 WHERE o.orders_uuid = $2 AND a.account_uuid = o.orders_account_uuid`,
-			a.Accrual, uuid,
-		)
-		if err != nil {
-			log.Printf("worker: update balance error: %v", err)
-			return
-		}
-	}
-
-	tx.Commit()
 }

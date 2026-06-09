@@ -16,13 +16,15 @@ import (
 
 // mockDB — мок базы данных для тестов
 type mockDB struct {
-	registerFn       func(ctx context.Context, login, pass string) (string, error)
-	loginFn          func(ctx context.Context, login, pass string) (string, error)
-	insertOrderFn    func(ctx context.Context, accountUUID string, orderCode int64) error
-	getOrdersFn      func(ctx context.Context, accountUUID string) ([]map[string]interface{}, error)
-	getBalanceFn     func(ctx context.Context, accountUUID string) (map[string]interface{}, error)
-	withdrawFn       func(ctx context.Context, accountUUID string, orderNumber int64, sum decimal.Decimal) error
-	getWithdrawalsFn func(ctx context.Context, accountUUID string) ([]map[string]interface{}, error)
+	registerFn           func(ctx context.Context, login, pass string) (string, error)
+	loginFn              func(ctx context.Context, login, pass string) (string, error)
+	insertOrderFn        func(ctx context.Context, accountUUID string, orderCode int64) error
+	getOrdersFn          func(ctx context.Context, accountUUID string) ([]map[string]interface{}, error)
+	getBalanceFn         func(ctx context.Context, accountUUID string) (map[string]interface{}, error)
+	withdrawFn           func(ctx context.Context, accountUUID string, orderNumber int64, sum decimal.Decimal) error
+	getWithdrawalsFn     func(ctx context.Context, accountUUID string) ([]map[string]interface{}, error)
+	getPendingOrdersFn   func(ctx context.Context) ([]database.PendingOrder, error)
+	updateOrderAccrualFn func(ctx context.Context, uuid string, status string, accrual decimal.Decimal) error
 }
 
 func (m *mockDB) Register(ctx context.Context, login, pass string) (string, error) {
@@ -45,6 +47,18 @@ func (m *mockDB) Withdraw(ctx context.Context, accountUUID string, orderNumber i
 }
 func (m *mockDB) GetWithdrawals(ctx context.Context, accountUUID string) ([]map[string]interface{}, error) {
 	return m.getWithdrawalsFn(ctx, accountUUID)
+}
+func (m *mockDB) GetPendingOrders(ctx context.Context) ([]database.PendingOrder, error) {
+	if m.getPendingOrdersFn == nil {
+		return nil, nil
+	}
+	return m.getPendingOrdersFn(ctx)
+}
+func (m *mockDB) UpdateOrderAccrual(ctx context.Context, uuid string, status string, accrual decimal.Decimal) error {
+	if m.updateOrderAccrualFn == nil {
+		return nil
+	}
+	return m.updateOrderAccrualFn(ctx, uuid, status, accrual)
 }
 func (m *mockDB) Close() error { return nil }
 

@@ -176,10 +176,7 @@ func (s *Server) addOrderHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusAccepted) // 202
-	// go func() {
-	// 	// TODO: обработка заказа во внешней системе начислений
-	// }()
+	w.WriteHeader(http.StatusAccepted)
 }
 
 // ordersHandler — получение списка загруженных пользователем номеров заказов, статусов их обработки
@@ -251,7 +248,6 @@ func (s *Server) withdrawHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err = s.db.Withdraw(r.Context(), r.Context().Value("uid").(string), orderNumber, req.Sum)
-	//TODO списание во внешней системе начислений, если заказ не найден статус 422
 	if err != nil {
 		if errors.Is(err, database.ErrInsufficientFunds) {
 			w.WriteHeader(http.StatusPaymentRequired)

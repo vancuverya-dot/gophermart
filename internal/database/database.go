@@ -31,6 +31,13 @@ type Service interface {
 	Withdraw(ctx context.Context, accountUUID string, orderNumber int64, sum decimal.Decimal) error
 	GetWithdrawals(ctx context.Context, accountUUID string) ([]map[string]interface{}, error)
 	DB() *sql.DB
+	GetPendingOrders(ctx context.Context) ([]PendingOrder, error)
+	UpdateOrderAccrual(ctx context.Context, uuid string, status string, accrual decimal.Decimal) error
+}
+
+type PendingOrder struct {
+	UUID string
+	Code int64
 }
 
 type service struct {
@@ -331,4 +338,59 @@ func (s *service) GetWithdrawals(ctx context.Context, accountUUID string) ([]map
 func (s *service) Close() error {
 	log.Printf("Disconnected from database")
 	return s.db.Close()
+}
+
+// GetPendingOrders возвращает список заказов в статусе NEW или PROCESSING.
+// Используется воркером для получения заказов требующих обработки в системе начислений.
+func (s *service) GetPendingOrders(ctx context.Context) ([]PendingOrder, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT orders_uuid, orders_code FROM public.orders
+         WHERE orders_status IN ('NEW', 'PROCESSING')`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var orders []PendingOrder
+	for rows.Next() {
+		var o PendingOrder
+		if err := rows.Scan(&o.UUID, &o.Code); err != nil {
+			continue
+		}
+		orders = append(orders, o)
+	}
+	return orders, rows.Err()
+}
+
+// UpdateOrderAccrual обновляет статус заказа и начисляет баллы пользователю.
+// Операция выполняется в транзакции — либо обновляется и статус заказа
+// и баланс пользователя, либо не обновляется ничего.
+func (s *service) UpdateOrderAccrual(ctx context.Context, uuid string, status string, accrual decimal.Decimal) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(ctx,
+		`UPDATE public.orders SET orders_status=$1, orders_accrual=$2 WHERE orders_uuid=$3`,
+		status, accrual, uuid,
+	)
+	if err != nil {
+		return err
+	}
+
+	if status == "PROCESSED" && !accrual.IsZero() {
+		_, err = tx.ExecContext(ctx,
+			`UPDATE public.account a SET account_balance = account_balance + $1
+             FROM public.orders o
+             WHERE o.orders_uuid = $2 AND a.account_uuid = o.orders_account_uuid`,
+			accrual, uuid,
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
