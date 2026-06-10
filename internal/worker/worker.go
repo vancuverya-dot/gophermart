@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	retryablehttp "github.com/hashicorp/go-retryablehttp"
@@ -31,7 +32,7 @@ type Worker struct {
 	db                   database.Service
 	client               *http.Client
 	jobs                 chan order
-	mu                   sync.RWMutex
+	pauseUntil           atomic.Pointer[time.Time] // timestamp до которого воркеры не делают запросы
 	accrualSystemAddress string
 }
 
@@ -75,9 +76,7 @@ func (w *Worker) dispatch(ctx context.Context, interval time.Duration) {
 			close(w.jobs)
 			return
 		case <-ticker.C:
-			w.mu.RLock()
 			w.loadJobs(ctx)
-			w.mu.RUnlock()
 		}
 	}
 }
@@ -109,9 +108,15 @@ func (w *Worker) runWorker(ctx context.Context) {
 				return
 			}
 
-			w.mu.RLock()
+			if until := w.pauseUntil.Load(); until != nil && time.Now().Before(*until) {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(time.Until(*until)):
+				}
+			}
+
 			w.processOne(ctx, o)
-			w.mu.RUnlock()
 		}
 	}
 }
@@ -132,20 +137,10 @@ func (w *Worker) processOne(ctx context.Context, o order) {
 		if sec == 0 {
 			sec = 60
 		}
-		log.Printf("worker: hit 429, freezing all workers for %d seconds", sec)
+		log.Printf("worker: hit 429, pausing all workers for %d seconds", sec)
 
-		w.mu.RUnlock()
-		w.mu.Lock()
-
-		select {
-		case <-time.After(time.Duration(sec) * time.Second):
-		case <-ctx.Done():
-			w.mu.Unlock()
-			return
-		}
-
-		w.mu.Unlock()
-		w.mu.RLock()
+		until := time.Now().Add(time.Duration(sec) * time.Second)
+		w.pauseUntil.Store(&until)
 
 		select {
 		case w.jobs <- o:
