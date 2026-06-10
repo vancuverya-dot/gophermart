@@ -14,7 +14,7 @@ import (
 	"github.com/vancuverya-dot/gophermart/internal/worker"
 )
 
-func gracefulShutdown(apiServer *http.Server, done chan bool) {
+func gracefulShutdown(apiServer *http.Server, done chan struct{}) {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	<-ctx.Done()
@@ -29,28 +29,42 @@ func gracefulShutdown(apiServer *http.Server, done chan bool) {
 	}
 
 	log.Println("Server exiting")
-
-	done <- true
+	close(done)
 }
 
 func main() {
-	config.Init()
+	cfg := config.New()
 
-	db := database.New()
+	db, err := database.New(cfg.DBURI)
+	if err != nil {
+		log.Fatalf("failed to init database: %v", err)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go worker.New(db).Run(ctx)
 
-	srv := server.NewServer(db)
+	w := worker.New(db, cfg.AccrualSystemAddress)
+	workerDone := make(chan struct{})
+	go func() {
+		w.Run(ctx, 2*time.Second)
+		close(workerDone)
+	}()
+
+	srv := server.NewServerWithDB(db, cfg)
 	log.Printf("Starting server on %s", srv.Addr)
 
-	done := make(chan bool, 1)
+	done := make(chan struct{})
 	go gracefulShutdown(srv, done)
 
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("http server error: %s", err)
 	}
+
 	<-done
+	cancel()
+	<-workerDone
+
+	if err := db.Close(); err != nil {
+		log.Printf("error closing database: %v", err)
+	}
 	log.Println("Graceful shutdown complete.")
 }

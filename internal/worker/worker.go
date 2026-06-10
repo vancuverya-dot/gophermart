@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
+	retryablehttp "github.com/hashicorp/go-retryablehttp"
 	"github.com/shopspring/decimal"
-	"github.com/vancuverya-dot/gophermart/internal/config"
 	"github.com/vancuverya-dot/gophermart/internal/database"
 )
 
@@ -28,21 +28,27 @@ type order struct {
 }
 
 type Worker struct {
-	db     database.Service
-	client *http.Client
-	jobs   chan order
-	mu     sync.RWMutex
+	db                   database.Service
+	client               *http.Client
+	jobs                 chan order
+	mu                   sync.RWMutex
+	accrualSystemAddress string
 }
 
-func New(db database.Service) *Worker {
+func New(db database.Service, accrualSystemAddress string) *Worker {
+	retryClient := retryablehttp.NewClient()
+	retryClient.RetryMax = 3
+	retryClient.Logger = nil
+
 	return &Worker{
-		db:     db,
-		client: &http.Client{Timeout: 10 * time.Second},
-		jobs:   make(chan order, 100),
+		db:                   db,
+		client:               retryClient.StandardClient(),
+		jobs:                 make(chan order, 100),
+		accrualSystemAddress: accrualSystemAddress,
 	}
 }
 
-func (w *Worker) Run(ctx context.Context) {
+func (w *Worker) Run(ctx context.Context, interval time.Duration) {
 	var wg sync.WaitGroup
 
 	for i := 0; i < workerCount; i++ {
@@ -53,14 +59,14 @@ func (w *Worker) Run(ctx context.Context) {
 		}()
 	}
 
-	go w.dispatch(ctx)
+	go w.dispatch(ctx, interval)
 
 	wg.Wait()
 	log.Println("worker pool stopped")
 }
 
-func (w *Worker) dispatch(ctx context.Context) {
-	ticker := time.NewTicker(2 * time.Second)
+func (w *Worker) dispatch(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
@@ -111,7 +117,7 @@ func (w *Worker) runWorker(ctx context.Context) {
 }
 
 func (w *Worker) processOne(ctx context.Context, o order) {
-	url := fmt.Sprintf("%s/api/orders/%d", config.AccrualSystemAddress, o.code)
+	url := fmt.Sprintf("%s/api/orders/%d", w.accrualSystemAddress, o.code)
 
 	resp, err := w.client.Get(url)
 	if err != nil {

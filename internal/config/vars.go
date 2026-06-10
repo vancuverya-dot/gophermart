@@ -5,37 +5,44 @@ import (
 	"os"
 )
 
-var (
+// Config — конфигурация приложения.
+type Config struct {
 	TokenKey             string
 	DBURI                string
 	RunAddress           string
 	AccrualSystemAddress string
-)
+}
 
-func Init() {
-	var runAddress, dbUri, accrualAddress string
+// New — создаёт конфиг из флагов командной строки и переменных окружения.
+// Флаги имеют приоритет над переменными окружения.
+func New() *Config {
+	var runAddress, dbURI, accrualAddress string
 	flag.StringVar(&runAddress, "a", "", "address and port to run server")
-	flag.StringVar(&dbUri, "d", "", "database uri")
+	flag.StringVar(&dbURI, "d", "", "database uri")
 	flag.StringVar(&accrualAddress, "r", "", "address of accrual system")
 	flag.Parse()
 
-	if runAddress != "" {
-		RunAddress = runAddress
-	} else {
-		RunAddress = os.Getenv("RUN_ADDRESS")
+	cfg := &Config{
+		TokenKey: os.Getenv("TOKEN_KEY"),
 	}
 
-	if dbUri != "" {
-		DBURI = dbUri
+	if runAddress != "" {
+		cfg.RunAddress = runAddress
 	} else {
-		DBURI = os.Getenv("DATABASE_URI")
+		cfg.RunAddress = os.Getenv("RUN_ADDRESS")
+	}
+
+	if dbURI != "" {
+		cfg.DBURI = dbURI
+	} else {
+		cfg.DBURI = os.Getenv("DATABASE_URI")
 	}
 
 	if accrualAddress != "" {
-		AccrualSystemAddress = accrualAddress
+		cfg.AccrualSystemAddress = accrualAddress
 	} else {
-		AccrualSystemAddress = os.Getenv("ACCRUAL_SYSTEM_ADDRESS")
+		cfg.AccrualSystemAddress = os.Getenv("ACCRUAL_SYSTEM_ADDRESS")
 	}
 
-	TokenKey = os.Getenv("TOKEN_KEY")
+	return cfg
 }

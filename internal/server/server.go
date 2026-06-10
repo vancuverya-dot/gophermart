@@ -11,12 +11,14 @@ import (
 type Server struct {
 	addr string
 	db   database.Service
+	cfg  *config.Config
 }
 
-func NewServer(db database.Service) *http.Server {
+func NewServerWithDB(db database.Service, cfg *config.Config) *http.Server {
 	s := &Server{
-		addr: config.RunAddress,
+		addr: cfg.RunAddress,
 		db:   db,
+		cfg:  cfg,
 	}
 	return &http.Server{
 		Addr:         s.addr,

@@ -2,17 +2,16 @@ package database
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
 	"strconv"
 	"time"
 
-	"github.com/vancuverya-dot/gophermart/internal/config"
 	"github.com/vancuverya-dot/gophermart/internal/migrations"
+
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgerrcode"
@@ -44,16 +43,11 @@ type service struct {
 	db *sql.DB
 }
 
-var dbInstance *service
-
-func New() Service {
-	if dbInstance != nil {
-		return dbInstance
-	}
-
-	db, err := sql.Open("pgx", config.DBURI)
+// New — создаёт новое подключение к базе данных.
+func New(dbURI string) (Service, error) {
+	db, err := sql.Open("pgx", dbURI)
 	if err != nil {
-		log.Fatal(err)
+		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
 	db.SetMaxOpenConns(25)
@@ -61,13 +55,10 @@ func New() Service {
 	db.SetConnMaxLifetime(5 * time.Minute)
 
 	if err := migrations.Up(db); err != nil {
-		log.Fatalf("failed to run migrations: %v", err)
+		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
 
-	dbInstance = &service{
-		db: db,
-	}
-	return dbInstance
+	return &service{db: db}, nil
 }
 
 var ErrLoginTaken = errors.New("login already taken")
@@ -82,17 +73,18 @@ var ErrInsufficientFunds = errors.New("insufficient funds")
 // Возможные ошибки
 // ErrLoginTaken — логин уже занят;
 func (s *service) Register(ctx context.Context, login, pass string) (string, error) {
-	hash := sha256.Sum256([]byte(pass))
-	hashStr := hex.EncodeToString(hash[:])
+	hash, err := bcrypt.GenerateFromPassword([]byte(pass), bcrypt.DefaultCost)
+	if err != nil {
+		return "", fmt.Errorf("failed to hash password: %w", err)
+	}
 
 	u4 := uuid.NewString()
-	_, err := s.db.ExecContext(ctx,
+	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO public.account 
             (account_login, account_pass_sha256, account_uuid) 
          VALUES ($1, $2, $3)`,
-		login, hashStr, u4,
+		login, string(hash), u4,
 	)
-
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
@@ -107,16 +99,15 @@ func (s *service) Register(ctx context.Context, login, pass string) (string, err
 // Возможные ошибки
 // ErrUserNotFound — пользователь не найден;
 func (s *service) Login(ctx context.Context, login, pass string) (string, error) {
-	hash := sha256.Sum256([]byte(pass))
-	hashStr := fmt.Sprintf("%x", hash)
+	var accid string
+	var storedHash string
 
-	var _accid string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT account_uuid
+		`SELECT account_uuid, account_pass_sha256
 		 FROM public.account 
-		 WHERE account_login = $1 AND account_pass_sha256 = $2`,
-		login, hashStr,
-	).Scan(&_accid)
+		 WHERE account_login = $1`,
+		login,
+	).Scan(&accid, &storedHash)
 
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -125,7 +116,11 @@ func (s *service) Login(ctx context.Context, login, pass string) (string, error)
 		return "", err
 	}
 
-	return _accid, nil
+	if err := bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(pass)); err != nil {
+		return "", ErrUserNotFound
+	}
+
+	return accid, nil
 }
 
 // InsertOrder - вставка номера заказа для расчёта.
@@ -135,32 +130,35 @@ func (s *service) Login(ctx context.Context, login, pass string) (string, error)
 // ErrOrderTakenByAnother — номер заказа уже был загружен другим пользователем;
 // ErrInvalidOrderFormat — неверный формат номера заказа;
 func (s *service) InsertOrder(ctx context.Context, accountUUID string, orderCode int64) error {
-	_, err := s.db.ExecContext(ctx,
+	var ownerUUID string
+	err := s.db.QueryRowContext(ctx,
 		`INSERT INTO public.orders (orders_uuid, orders_account_uuid, orders_code)
-		 VALUES (gen_random_uuid(), $1, $2)`,
+		 VALUES (gen_random_uuid(), $1, $2)
+		 ON CONFLICT (orders_code) DO NOTHING
+		 RETURNING orders_account_uuid`,
 		accountUUID, orderCode,
-	)
-	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
-			var ownerUUID string
-			err := s.db.QueryRowContext(ctx,
-				`SELECT orders_account_uuid FROM public.orders WHERE orders_code = $1`,
-				orderCode,
-			).Scan(&ownerUUID)
-			if err != nil {
-				return err
-			}
+	).Scan(&ownerUUID)
 
-			if ownerUUID == accountUUID {
-				return ErrOrderAlreadyExists
-			}
-			return ErrOrderTakenByAnother
-		}
-		return err
+	if err == nil {
+		return nil
 	}
 
-	return nil
+	if errors.Is(err, sql.ErrNoRows) {
+		err := s.db.QueryRowContext(ctx,
+			`SELECT orders_account_uuid FROM public.orders WHERE orders_code = $1`,
+			orderCode,
+		).Scan(&ownerUUID)
+		if err != nil {
+			return err
+		}
+
+		if ownerUUID == accountUUID {
+			return ErrOrderAlreadyExists
+		}
+		return ErrOrderTakenByAnother
+	}
+
+	return err
 }
 
 // GetOrdersByAccountUUID — получение списка загруженных пользователем номеров заказов, статусов их обработки
@@ -287,7 +285,10 @@ func (s *service) Withdraw(ctx context.Context, accountUUID string, orderNumber 
 		return err
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit failed: %w", err)
+	}
+	return nil
 }
 
 // DB — возвращает внутренний *sql.DB для воркера.
@@ -392,5 +393,8 @@ func (s *service) UpdateOrderAccrual(ctx context.Context, uuid string, status st
 		}
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit failed: %w", err)
+	}
+	return nil
 }

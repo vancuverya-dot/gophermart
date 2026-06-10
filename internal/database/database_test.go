@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"testing"
 	"time"
@@ -11,7 +12,9 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-func mustStartPostgresContainer() (func(context.Context, ...testcontainers.TerminateOption) error, error) {
+var postgresDSN string
+
+func mustStartPostgresContainer() (string, func(context.Context, ...testcontainers.TerminateOption) error, error) {
 	var (
 		dbName = "database"
 		dbPwd  = "password"
@@ -30,46 +33,57 @@ func mustStartPostgresContainer() (func(context.Context, ...testcontainers.Termi
 				WithStartupTimeout(5*time.Second)),
 	)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 
-	_, err = dbContainer.Host(context.Background())
+	host, err := dbContainer.Host(context.Background())
 	if err != nil {
-		return dbContainer.Terminate, err
+		return "", dbContainer.Terminate, err
 	}
 
-	_, err = dbContainer.MappedPort(context.Background(), "5432/tcp")
+	port, err := dbContainer.MappedPort(context.Background(), "5432/tcp")
 	if err != nil {
-		return dbContainer.Terminate, err
+		return "", dbContainer.Terminate, err
 	}
 
-	return dbContainer.Terminate, err
+	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", dbUser, dbPwd, host, port.Port(), dbName)
+
+	return dsn, dbContainer.Terminate, nil
 }
 
 func TestMain(m *testing.M) {
-	teardown, err := mustStartPostgresContainer()
+	dsn, teardown, err := mustStartPostgresContainer()
 	if err != nil {
 		log.Fatalf("could not start postgres container: %v", err)
 	}
+	postgresDSN = dsn
 
 	m.Run()
 
-	if teardown != nil && teardown(context.Background()) != nil {
-		log.Fatalf("could not teardown postgres container: %v", err)
+	if teardown != nil {
+		if err := teardown(context.Background()); err != nil {
+			log.Fatalf("could not teardown postgres container: %v", err)
+		}
 	}
 }
 
 func TestNew(t *testing.T) {
-	srv := New()
+	srv, err := New(postgresDSN)
+	if err != nil {
+		t.Fatalf("New() returned error: %v", err)
+	}
 	if srv == nil {
 		t.Fatal("New() returned nil")
 	}
 }
 
 func TestClose(t *testing.T) {
-	srv := New()
+	srv, err := New(postgresDSN)
+	if err != nil {
+		t.Fatalf("New() returned error: %v", err)
+	}
 
-	if srv.Close() != nil {
-		t.Fatalf("expected Close() to return nil")
+	if err := srv.Close(); err != nil {
+		t.Fatalf("expected Close() to return nil, got %v", err)
 	}
 }

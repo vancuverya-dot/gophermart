@@ -3,6 +3,7 @@ package migrations
 import (
 	"database/sql"
 	"embed"
+	"fmt"
 	"log"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -17,25 +18,21 @@ var migrationsFS embed.FS
 func Up(db *sql.DB) error {
 	sourceDriver, err := iofs.New(migrationsFS, "sql")
 	if err != nil {
-		log.Printf("failed to create migration source: %v", err)
-		return err
+		return fmt.Errorf("failed to create migration source: %w", err)
 	}
 
 	dbDriver, err := postgres.WithInstance(db, &postgres.Config{})
 	if err != nil {
-		log.Printf("failed to create migration driver: %v", err)
-		return err
+		return fmt.Errorf("failed to create migration driver: %w", err)
 	}
 
 	m, err := migrate.NewWithInstance("iofs", sourceDriver, "postgres", dbDriver)
 	if err != nil {
-		log.Printf("failed to create migrate instance: %v", err)
-		return err
+		return fmt.Errorf("failed to create migrate instance: %w", err)
 	}
 
 	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
-		log.Printf("failed to apply migrations: %v", err)
-		return err
+		return fmt.Errorf("failed to apply migrations: %w", err)
 	}
 
 	log.Println("migrations applied successfully")

@@ -8,13 +8,13 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/shopspring/decimal"
 
-	"github.com/vancuverya-dot/gophermart/internal/config"
 	"github.com/vancuverya-dot/gophermart/internal/database"
 )
 
@@ -27,7 +27,7 @@ func (s *Server) RegisterRoutes() http.Handler {
 	r.Post("/api/user/login", s.loginHandler)
 
 	r.Group(func(r chi.Router) {
-		r.Use(AuthMiddleware)
+		r.Use(s.AuthMiddleware)
 		r.Get("/api/user/orders", s.ordersHandler)
 		r.Post("/api/user/orders", s.addOrderHandler)
 		r.Get("/api/user/balance", s.balanceHandler)
@@ -69,12 +69,14 @@ func (s *Server) registerHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.WriteHeader(http.StatusInternalServerError)
+		log.Printf("registration error: %v", err)
 		return
 	}
 
-	token, err := generateToken(uid)
+	token, err := s.generateToken(uid)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
+		log.Printf("token generation error: %v", err)
 		return
 	}
 
@@ -114,12 +116,14 @@ func (s *Server) loginHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.WriteHeader(http.StatusInternalServerError)
+		log.Printf("login error: %v", err)
 		return
 	}
 
-	token, err := generateToken(uid)
+	token, err := s.generateToken(uid)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
+		log.Printf("token generation error: %v", err)
 		return
 	}
 
@@ -162,7 +166,7 @@ func (s *Server) addOrderHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	uid := r.Context().Value("uid").(string)
+	uid := GetUID(r.Context())
 	err = s.db.InsertOrder(r.Context(), uid, code)
 	if err != nil {
 		switch {
@@ -172,6 +176,7 @@ func (s *Server) addOrderHandler(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusConflict)
 		default:
 			w.WriteHeader(http.StatusInternalServerError)
+			log.Printf("insert order error: %v", err)
 		}
 		return
 	}
@@ -187,11 +192,12 @@ func (s *Server) addOrderHandler(w http.ResponseWriter, r *http.Request) {
 // 401 — пользователь не авторизован.
 // 500 — внутренняя ошибка сервера.
 func (s *Server) ordersHandler(w http.ResponseWriter, r *http.Request) {
-	uid := r.Context().Value("uid").(string)
+	uid := GetUID(r.Context())
 
 	orders, err := s.db.GetOrdersByAccountUUID(r.Context(), uid)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
+		log.Printf("get orders error: %v", err)
 		return
 	}
 
@@ -211,11 +217,12 @@ func (s *Server) ordersHandler(w http.ResponseWriter, r *http.Request) {
 // 401 — пользователь не авторизован.
 // 500 — внутренняя ошибка сервера.
 func (s *Server) balanceHandler(w http.ResponseWriter, r *http.Request) {
-	uid := r.Context().Value("uid").(string)
+	uid := GetUID(r.Context())
 
 	balance, err := s.db.GetBalance(r.Context(), uid)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
+		log.Printf("get balance error: %v", err)
 		return
 	}
 
@@ -247,13 +254,15 @@ func (s *Server) withdrawHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = s.db.Withdraw(r.Context(), r.Context().Value("uid").(string), orderNumber, req.Sum)
+	uid := GetUID(r.Context())
+	err = s.db.Withdraw(r.Context(), uid, orderNumber, req.Sum)
 	if err != nil {
 		if errors.Is(err, database.ErrInsufficientFunds) {
 			w.WriteHeader(http.StatusPaymentRequired)
 			return
 		}
 		w.WriteHeader(http.StatusInternalServerError)
+		log.Printf("withdraw error: %v", err)
 		return
 	}
 
@@ -267,10 +276,11 @@ func (s *Server) withdrawHandler(w http.ResponseWriter, r *http.Request) {
 // 401 — пользователь не авторизован.
 // 500 — внутренняя ошибка сервера.
 func (s *Server) withdrawalsHandler(w http.ResponseWriter, r *http.Request) {
-	uid := r.Context().Value("uid").(string)
+	uid := GetUID(r.Context())
 
 	withdrawals, err := s.db.GetWithdrawals(r.Context(), uid)
 	if err != nil {
+		log.Printf("get withdrawals error: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -310,12 +320,13 @@ func luhnCheck(number int64) bool {
 	return sum%10 == 0
 }
 
-func generateToken(u4 string) (string, error) {
-	log.Printf("generating token for uid=%s key=%s", u4, config.TokenKey)
+func (s *Server) generateToken(u4 string) (string, error) {
 	claims := &Claims{
-		UserID:           u4,
-		RegisteredClaims: jwt.RegisteredClaims{},
+		UserID: u4,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(config.TokenKey))
+	return token.SignedString([]byte(s.cfg.TokenKey))
 }

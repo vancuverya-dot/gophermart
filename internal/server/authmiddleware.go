@@ -3,13 +3,20 @@ package server
 import (
 	"context"
 	"errors"
-	"log"
 	"net/http"
-
-	"github.com/vancuverya-dot/gophermart/internal/config"
 
 	"github.com/golang-jwt/jwt/v5"
 )
+
+type contextKey string
+
+const uidKey contextKey = "uid"
+
+// GetUID — возвращает uid пользователя из контекста.
+func GetUID(ctx context.Context) string {
+	uid, _ := ctx.Value(uidKey).(string)
+	return uid
+}
 
 type Claims struct {
 	UserID string `json:"user_id"`
@@ -19,7 +26,7 @@ type Claims struct {
 
 var ErrInvalidToken = errors.New("bad token")
 
-func AuthMiddleware(next http.Handler) http.Handler {
+func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var tokenStr string
 
@@ -41,14 +48,8 @@ func AuthMiddleware(next http.Handler) http.Handler {
 			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, ErrInvalidToken
 			}
-			return []byte(config.TokenKey), nil
+			return []byte(s.cfg.TokenKey), nil
 		})
-
-		if err != nil || !token.Valid {
-			log.Printf("token validation failed: err=%v valid=%v tokenStr=%s", err, token.Valid, tokenStr) // ← сюда
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
 
 		if err != nil || !token.Valid {
 			w.WriteHeader(http.StatusUnauthorized)
@@ -56,7 +57,7 @@ func AuthMiddleware(next http.Handler) http.Handler {
 		}
 
 		claims := token.Claims.(*Claims)
-		ctx := context.WithValue(r.Context(), "uid", claims.UserID)
+		ctx := context.WithValue(r.Context(), uidKey, claims.UserID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
